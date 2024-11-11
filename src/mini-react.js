@@ -156,12 +156,14 @@
     }
   
     let wipFiber = null; //当前fiber节点
+    let stateHookIndex = null; //为了存取前一个fiber节点的useState的hook函数并将其执行完而设立的坐标， 
     //为什么effect hook没有这种坐标？
     //因为useEffect, 是通过队列搞定的
   
     //初始化/更新 函数组件的fiber节点
     function updateFunctionComponent(fiber) {
       wipFiber = fiber;
+      stateHookIndex = 0;
       wipFiber.stateHooks = []; //挂载
       wipFiber.effectHooks = [];
   
@@ -287,6 +289,49 @@
       }
     }
   
+    function useState(initialState) {
+      const currentFiber = wipFiber;
+  
+      const oldHook = wipFiber.alternate?.stateHooks[stateHookIndex];
+  
+      const stateHook = {
+        state: oldHook ? oldHook.state : initialState,
+        queue: oldHook ? oldHook.queue : [],
+      };
+  
+      stateHook.queue.forEach((action) => {
+        stateHook.state = action(stateHook.state);
+      });
+  
+      stateHook.queue = [];
+  
+      stateHookIndex++;
+      wipFiber.stateHooks.push(stateHook);
+  
+      function setState(action) {
+        const isFunction = typeof action === "function";
+  
+        stateHook.queue.push(isFunction ? action : () => action);
+  
+        wipRoot = {
+          ...currentFiber,
+          alternate: currentFiber,
+        };
+        nextUnitOfWork = wipRoot;
+      }
+  
+      return [stateHook.state, setState];
+    }
+  
+    function useEffect(callback, deps) {
+      const effectHook = {
+        callback,
+        deps,
+        cleanup: undefined,
+      };
+      wipFiber.effectHooks.push(effectHook);
+    }
+  
     //先把删除的节点搞掉
     //然后再去执行子节点更新和新增
   
@@ -394,6 +439,8 @@
     const MiniReact = {
       createElement,
       render,
+      useState,
+      useEffect,
     };
     
   //用立即执行函数包裹起来， 防止全局变量污染
